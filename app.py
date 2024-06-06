@@ -1,33 +1,66 @@
 import streamlit as st
-import requests
-import json
+import speech_recognition as sr
+from transformers import pipeline
 
-st.title("Transcripción y Análisis de Sentimientos de Audio/Video")
+# Función para transcribir audio
+def transcribe_audio(file_path):
+    recognizer = sr.Recognizer()
+    
+    try:
+        with sr.AudioFile(file_path) as source:
+            audio_data = recognizer.record(source)
+            text = recognizer.recognize_google(audio_data, language="es-ES")
+            return text
+    except sr.UnknownValueError:
+        return "Google Web Speech API no pudo entender el audio"
+    except sr.RequestError as e:
+        return f"No se pudieron solicitar resultados de la API de Google Web Speech; {e}"
+    except Exception as e:
+        return f"Ocurrió un error: {e}"
 
-uploaded_file = st.file_uploader("Elija un archivo de audio o video", type=["mp3", "mp4", "wav"])
+# Interfaz de Streamlit
+st.title("Transcripción de Audio a Texto y Análisis de Sentimientos")
+st.header("Carga un archivo de audio en formato WAV para transcribir y analizar")
+
+# Mensaje de carga para el pipeline de análisis de sentimientos
+with st.spinner("Cargando el modelo de análisis de sentimientos..."):
+    sentiment_pipeline = pipeline("sentiment-analysis")
+st.success("Modelo de análisis de sentimientos cargado")
+
+uploaded_file = st.file_uploader("Elige un archivo de audio...", type=["wav"])
 
 if uploaded_file is not None:
-    st.audio(uploaded_file, format='audio/wav')
+    st.audio(uploaded_file, format="audio/wav")
     
-    if st.button("Transcribir y Analizar"):
-        with st.spinner("Transcribiendo y Analizando..."):
-            try:
-                # Enviar el archivo a la API
-                files = {'file': uploaded_file.getvalue()}
-                response = requests.post("http://localhost:8000/transcribe_and_analyze", files=files)
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    transcription = result.get("transcription", "")
-                    analysis = result.get("analysis", [])
-                    
-                    st.subheader("Transcripción")
-                    st.write(transcription)
-                    
-                    st.subheader("Análisis de Sentimientos")
-                    for item in analysis:
-                        st.write(f"Sentimiento: {item['label']} - Puntaje: {item['score']:.2f}")
+    if st.button("Iniciar Transcripción y Análisis"):
+        # Guardar el archivo subido temporalmente
+        with open("temp_audio.wav", "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        
+        # Transcribir el audio
+        with st.spinner("Transcribiendo el audio..."):
+            transcription = transcribe_audio("temp_audio.wav")
+        st.success("Transcripción completada")
+        st.header("Transcripción")
+        st.write(transcription)
+        
+        if transcription:
+            # Analizar el texto transcrito
+            with st.spinner("Realizando análisis de sentimientos..."):
+                analysis = sentiment_pipeline(transcription)
+            st.success("Análisis de sentimientos completado")
+            st.header("Análisis de Sentimientos")
+            
+            # Mostrar el análisis de sentimientos con estilo
+               # Mostrar el análisis de sentimientos con estilo y traducción
+            for result in analysis:
+                label = result['label']
+                score = result['score']
+                if label == "NEGATIVE":
+                    label = "NEGATIVO"
+                    st.markdown(f"**El audio expresa un sentimiento:** :red[{label}]")
                 else:
-                    st.error(f"Error al analizar el archivo: {response.content.decode()}")
-            except Exception as e:
-                st.error(f"Se produjo un error: {str(e)}")
+                    label = "POSITIVO"
+                    st.markdown(f"**El audio expresa un sentimiento:** :green[{label}]")
+                st.markdown(f"**Confianza:** {score:.2%}")
+
